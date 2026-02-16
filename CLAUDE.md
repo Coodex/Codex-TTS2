@@ -16,6 +16,15 @@ It ships as an Android application backed by a native C++ audio/synthesis engine
 - **Platform:** Android (minSdk defined in `app/build.gradle`), with native code compiled via the Android NDK.
 - **This is not a demo, prototype, or learning project.** Treat every change as shipping to real users.
 
+### 1.1 Project Goals
+
+1. **Natural, intelligible Arabic speech** — Deliver synthesis quality that native Arabic speakers find acceptable for daily use, with correct pronunciation, natural prosody, and appropriate dialectal coverage.
+2. **Low-latency, offline-first** — Core synthesis must work entirely offline with no network dependency. Target sub-200 ms time-to-first-audio on mid-range Android devices.
+3. **System-level TTS integration** — Ship as a standard Android `TextToSpeechService` so any app on the device can use Codex-TTS2 as its system TTS engine.
+4. **MSA + dialect support** — Support Modern Standard Arabic as the baseline, with an architecture that allows pluggable voice/model packs for major dialect variants (Egyptian, Levantine, Gulf, Maghrebi).
+5. **Extensible architecture** — Adding a new language, voice, or synthesis backend must not require rewriting upper layers. New capabilities plug in below the JNI boundary or as swappable model files.
+6. **Production quality on constrained hardware** — The engine must run well on devices with limited RAM and CPU. Memory budgets and APK size are first-class constraints, not afterthoughts.
+
 ---
 
 ## 2. Architectural Principles (Non-Negotiable)
@@ -47,6 +56,36 @@ It ships as an Android application backed by a native C++ audio/synthesis engine
 5. **All public C++ APIs consumed by JNI must be C-linkage (`extern "C"`)** and documented in a header under `jni/`.
 6. **No raw `new`/`delete` in C++ engine code.** Use RAII, `std::unique_ptr`, `std::shared_ptr`, or arena allocators.
 
+### 2.3 TTS Pipeline Architecture
+
+The synthesis pipeline is a linear, stage-based data flow. Each stage has a well-defined input/output contract:
+
+```
+Input Text (UTF-8)
+    │
+    ▼
+┌─────────────────────┐
+│  Text Normalization  │  → NFC, kashida/tatweel strip, numeral expansion
+├─────────────────────┤
+│  Diacritization      │  → Add missing tashkeel (if undiacritized input)
+├─────────────────────┤
+│  Grapheme-to-Phoneme │  → Arabic G2P with assimilation & coarticulation
+├─────────────────────┤
+│  Prosody Prediction  │  → Duration, pitch contour, stress assignment
+├─────────────────────┤
+│  Acoustic Model      │  → Mel-spectrogram or equivalent generation
+├─────────────────────┤
+│  Vocoder / DSP       │  → Waveform synthesis from acoustic features
+└─────────────────────┘
+    │
+    ▼
+PCM Audio Output
+```
+
+- Each stage is a replaceable component behind a C++ interface. Swapping a vocoder or G2P module must not require changes above its interface boundary.
+- Stages communicate via value types (structs/spans), not heap-allocated polymorphic objects, on the hot path.
+- The pipeline is synchronous within a single synthesis call. Asynchronous scheduling happens in the service layer above JNI, not inside the engine.
+
 ---
 
 ## 3. Arabic-First TTS Constraints
@@ -71,6 +110,44 @@ Arabic is the primary and first-class language. Every design decision must accou
 - Output sample rate must be at least 22050 Hz (prefer 24000 Hz or higher).
 - No audible clipping, pops, or DC offset in generated audio.
 - Prosody must respect Arabic sentence structure (verb-subject-object patterns, iḍāfa chains, etc.).
+
+### 3.3 Arabic Phonology & Phoneme Inventory
+
+The phoneme set must faithfully represent Arabic's phonological system. The following is the minimum inventory the engine must support:
+
+**Consonants (28 base phonemes):**
+
+| Place | Voiceless | Voiced | Emphatic |
+|---|---|---|---|
+| Bilabial | /b/ | /m/ | — |
+| Labiodental | /f/ | — | — |
+| Dental/Alveolar | /t/, /s/ | /d/, /z/, /n/, /l/, /r/ | /tˤ/, /sˤ/, /dˤ/, /ðˤ/ |
+| Interdental | /θ/ | /ð/ | — |
+| Palatal | /ʃ/ | /j/ | — |
+| Velar | /k/ | /ɡ/ | — |
+| Uvular | /q/ | — | — |
+| Pharyngeal | /ħ/ | /ʕ/ | — |
+| Glottal | /h/, /ʔ/ | — | — |
+| Lateral | — | — | — |
+| Semivowel | /w/ | — | — |
+
+**Vowels (6 core phonemes):** /a/, /aː/, /i/, /iː/, /u/, /uː/. Diphthongs /aj/ and /aw/ are treated as vowel + glide sequences.
+
+**Phonological rules the G2P module must implement:**
+
+1. **Gemination (shadda)** — Geminated consonants must produce audibly longer duration; they are phonemically contrastive in Arabic (e.g., /darasa/ vs. /darrasa/).
+2. **Emphatic spreading** — Emphatic (pharyngealized) consonants affect adjacent vowel quality. The engine must model this coarticulatory effect on neighboring segments.
+3. **Assimilation at word boundaries** — Lam of the definite article assimilates to following sun letters. /ʔal + ʃams/ → /ʔaʃ-ʃams/.
+4. **Hamzat al-wasl** — Word-initial hamza may be elided in connected speech. The prosody model must handle this.
+5. **Pausal forms** — Word-final short vowels and tanween are dropped in pausal (utterance-final) position. /kitaːbun/ → /kitaːb/ at pause.
+6. **Taa marbuta realization** — Realized as /t/ in construct state (iḍāfa), as /h/ or silent in pausal form.
+7. **Dialectal phoneme mapping** — When dialect voices are active, the engine must remap phonemes (e.g., /q/ → /ʔ/ in Egyptian, /k/ → /tʃ/ in Gulf for certain contexts). These mappings are defined per-dialect in configuration, not hardcoded.
+
+**Prosodic model requirements:**
+
+- **Stress assignment** — Arabic stress is predictable and rule-based (generally penultimate heavy syllable). The model must compute stress from syllable weight.
+- **Intonation contours** — Support at minimum: declarative (falling), interrogative (rising), and continuation (level/slightly rising) contours.
+- **Phrase boundary detection** — Insert appropriate pauses and pitch resets at clause and sentence boundaries. Iḍāfa chains and conjunctive phrases must not be split by pauses.
 
 ---
 
@@ -105,6 +182,39 @@ Arabic is the primary and first-class language. Every design decision must accou
 - **Coroutines:** Use structured concurrency. All coroutine scopes must be lifecycle-aware (`viewModelScope`, `lifecycleScope`). No `GlobalScope`.
 - **Dependency injection:** Follow whatever DI framework the project adopts (Hilt/Dagger/Koin). Do not mix frameworks.
 - **Resource management:** All user-visible strings in `res/values/strings.xml` (and `res/values-ar/strings.xml` for Arabic). No hardcoded strings in Kotlin code.
+
+### 5.1 Android TTS Engine Skeleton
+
+Codex-TTS2 must implement the Android `TextToSpeechService` contract so it can serve as a system-level TTS engine. The skeleton comprises:
+
+**Service class:**
+
+- Subclass `android.speech.tts.TextToSpeechService`.
+- Implement the four required callbacks:
+  - `onIsLanguageAvailable(lang, country, variant)` — Return `TextToSpeech.LANG_AVAILABLE` / `LANG_COUNTRY_AVAILABLE` for supported Arabic locales.
+  - `onGetLanguage()` — Return the currently active language/locale triple.
+  - `onLoadLanguage(lang, country, variant)` — Load the appropriate voice/model for the requested locale. This must not block; heavy loading happens asynchronously and the engine reports readiness via state.
+  - `onSynthesizeText(request, callback)` — The core synthesis entry point. Extract text from `SynthesisRequest`, pass through the pipeline (normalization → G2P → synthesis), and stream PCM audio back via `SynthesisCallback.audioAvailable()`.
+- Register the service in `AndroidManifest.xml` with the `android.intent.action.TTS_SERVICE` intent filter and the `android.permission.BIND_TEXT_SERVICE` permission.
+
+**Audio output path:**
+
+- Within `onSynthesizeText`, call `callback.start(sampleRate, audioFormat, channelCount)` before writing audio.
+- Stream audio in chunks via `callback.audioAvailable(buffer, offset, length)`. Chunk size should balance latency (smaller = faster first audio) against overhead (larger = fewer JNI crossings).
+- Call `callback.done()` when synthesis is complete, or `callback.error()` on failure.
+- The native engine produces raw PCM. All format negotiation (sample rate, bit depth) happens at the `SynthesisCallback.start()` call.
+
+**Voice management:**
+
+- Expose available voices via `onGetVoices()` returning a list of `Voice` objects with locale, quality, latency, and feature descriptors.
+- Support voice selection via `onIsValidVoiceName()` and `onLoadVoice()`.
+- Voice/model data is stored in the app's internal storage or assets. External downloads (if supported) go to `getExternalFilesDir()` with integrity verification.
+
+**Lifecycle expectations:**
+
+- The service may be started and stopped by the system at any time. Native resources must be allocated in `onCreate` / `onLoadLanguage` and released in `onDestroy`.
+- The engine must handle concurrent `onSynthesizeText` calls (queued by the framework) without corruption. In practice, the framework serializes calls, but the engine must not assume this.
+- `onStop()` must promptly cancel in-progress synthesis and release the audio callback.
 
 ---
 
@@ -168,6 +278,21 @@ Every pull request must pass:
 - Every PR requires at least one approval.
 - CI must be green before merge. No "merge and fix later."
 - Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `refactor:`, `test:`, `ci:`, `docs:`, `chore:`.
+
+### 9.3 Branch & Versioning Strategy
+
+- **`main`** is the stable, release-ready branch. All code on `main` must build, pass tests, and be shippable.
+- **Feature branches** follow the naming pattern: `feat/<short-description>`, `fix/<short-description>`, `refactor/<short-description>`.
+- **Release branches** (when used): `release/vX.Y.Z`. Created from `main`, used only for final stabilization and hotfixes.
+- **Versioning** follows [Semantic Versioning](https://semver.org/): `MAJOR.MINOR.PATCH`. Version is defined in `app/build.gradle` (`versionCode` and `versionName`). Bump `versionCode` on every release; it must never decrease.
+- **Changelog** — Every PR that changes user-facing behavior must include a changelog entry or be tagged for automatic changelog generation from conventional commit messages.
+
+### 9.4 Artifact & Release Conventions
+
+- **Signed APKs/AABs** are produced only in CI. Never sign release builds locally.
+- **Native symbols** — Upload native debug symbols (`.so` with debug info) to crash reporting (Firebase Crashlytics or equivalent) on every release build.
+- **Model/data files** — If TTS models are too large for the APK, distribute via on-demand asset packs (Play Asset Delivery) or a first-launch download with integrity checks (SHA-256 verification).
+- **Reproducible builds** — Pin all dependency versions (no `+` or `latest` in Gradle dependencies). Use Gradle dependency locking or a version catalog (`libs.versions.toml`).
 
 ---
 
