@@ -1,0 +1,35 @@
+build:
+  maxIssues: 0
+
+complexity:
+  LongMethod:
+    threshold: 60
+  LongParameterList:
+    functionThreshold: 8
+    constructorThreshold: 10
+  TooManyFunctions:
+    thresholdInFiles: 20
+    thresholdInClasses: 20
+
+style:
+  MaxLineLength:
+    maxLineLength: 120
+    excludeCommentStatements: true
+  WildcardImport:
+    active: false
+  MagicNumber:
+    active: false
+  ReturnCount:
+    max: 5
+  ForbiddenComment:
+    active: false
+
+naming:
+  FunctionNaming:
+    active: true
+  VariableNaming:
+    active: true
+  TopLevelPropertyNaming:
+    constantPattern: '[A-Z][A-Za-z0-9_]*'
+  MatchingDeclarationName:
+    active: false
