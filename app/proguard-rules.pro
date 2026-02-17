@@ -1,13 +1,3 @@
-# sherpa-onnx JNI bindings — keep all native method declarations
--keep class com.k2fsa.sherpa.onnx.** { *; }
+# Codex-TTS2 ProGuard rules
 
-# Keep data classes used by JNI
--keepclassmembers class com.k2fsa.sherpa.onnx.GeneratedAudio {
-    <fields>;
-    <methods>;
-}
-
--keepclassmembers class com.k2fsa.sherpa.onnx.GenerationConfig {
-    <fields>;
-    <methods>;
-}
+# ONNX Runtime rules are provided by tts-onnx/consumer-rules.pro

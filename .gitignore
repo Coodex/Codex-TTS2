@@ -32,6 +32,3 @@ google-services.json
 
 # Android Profiling
 *.hprof
-
-# Pre-built native libraries (downloaded at build time via Gradle task)
-app/src/main/jniLibs/

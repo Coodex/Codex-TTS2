@@ -4,6 +4,13 @@ pluginManagement {
         mavenCentral()
         gradlePluginPortal()
     }
+    resolutionStrategy {
+        eachPlugin {
+            if (requested.id.namespace == "com.android") {
+                useModule("com.android.tools.build:gradle:${requested.version}")
+            }
+        }
+    }
 }
 
 @Suppress("UnstableApiUsage")
@@ -17,3 +24,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "Codex-TTS2"
 include(":app")
+include(":tts-core")
+include(":tts-onnx")
