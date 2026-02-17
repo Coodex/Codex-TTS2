@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Codex TTS</string>
+    <string name="btn_synthesize_arabic">Synthesize Arabic</string>
+    <string name="btn_synthesize_english">Synthesize English</string>
+    <string name="status_idle">Ready</string>
+    <string name="status_done">Done — saved to %1$s</string>
+    <string name="status_not_implemented">Engine not implemented yet</string>
+    <string name="sample_arabic">بسم الله الرحمن الرحيم</string>
+    <string name="sample_english">This is a test of the Codex text to speech engine.</string>
+</resources>

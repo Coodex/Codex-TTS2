@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">كودكس للنطق</string>
+    <string name="btn_synthesize_arabic">توليد صوت عربي</string>
+    <string name="btn_synthesize_english">توليد صوت إنجليزي</string>
+    <string name="status_idle">جاهز</string>
+    <string name="status_done">تم — حُفظ في %1$s</string>
+    <string name="status_not_implemented">المحرك لم يُنفَّذ بعد</string>
+</resources>
